@@ -1,166 +1,70 @@
-#include <Servo.h>
+// Pinnen definiëren
+const int drukknopPin = 4; // De GPIO-pin waar je fysieke knop op zit
+const int ledPin = 2;      // Ingebouwde LED van de ESP32 om te testen
 
-// ---------------- MOTOR PINS (L298N) ----------------
-#define IN1 8
-#define IN2 9
-#define IN3 10
-#define IN4 11
-#define ENA 5
-#define ENB 6
+// Variabelen voor de timer (non-blocking met millis)
+volatile bool robotMoetStoppen = false;
+unsigned long stopStartTijd = 0;
+const unsigned long stopDuur = 30000; // 30 seconden in milliseconden
 
-// ---------------- IR SENSORS ----------------
-#define IR_LEFT 2
-#define IR_MID 3
-#define IR_RIGHT 4
+// Variabelen voor ontbounden (debouncing) van de knop
+volatile unsigned long laatsteKnopDruk = 0;
+const unsigned long debounceTijd = 250; 
 
-// ---------------- ULTRASONIC ----------------
-#define TRIG A0
-#define ECHO A1
+// Deze functie voert de ESP32 ALTIJD uit als de knop wordt ingedrukt
+void IRAM_ATTR knopGedrukt() {
+  unsigned long nu = millis();
+  
+  // Checken of het geen valse klik (noise) is
+  if (nu - laatsteKnopDruk > debounceTijd) {
+    if (robotMoetStoppen) {
+      // Als de robot al stilstond, zorgt een nieuwe klik ervoor dat hij weer gaat rijden
+      robotMoetStoppen = false;
+    } else {
+      // Als de robot reed, zetten we de stop-status aan en starten we de timer
+      robotMoetStoppen = true;
+      stopStartTijd = nu;
+    }
+    laatsteKnopDruk = nu;
+  }
+}
 
-// ---------------- SERVO ----------------
-Servo scanner;
-#define SERVO_PIN 7
-
-// ---------------- SETTINGS ----------------
-int distanceThreshold = 15; // cm
-
-// ---------------- SETUP ----------------
 void setup() {
-  pinMode(IN1, OUTPUT);
-  pinMode(IN2, OUTPUT);
-  pinMode(IN3, OUTPUT);
-  pinMode(IN4, OUTPUT);
-
-  pinMode(ENA, OUTPUT);
-  pinMode(ENB, OUTPUT);
-
-  pinMode(IR_LEFT, INPUT);
-  pinMode(IR_MID, INPUT);
-  pinMode(IR_RIGHT, INPUT);
-
-  pinMode(TRIG, OUTPUT);
-  pinMode(ECHO, INPUT);
-
-  scanner.attach(SERVO_PIN);
-  scanner.write(90);
-
-  Serial.begin(9600);
+  Serial.begin(115200);
+  
+  // Instellen van de drukknop met ingebouwde pull-up resistor
+  pinMode(drukknopPin, INPUT_PULLUP);
+  pinMode(ledPin, OUTPUT);
+  
+  // De interrupt koppelen aan de knop: reageert als de knop wordt ingedrukt (FALLING)
+  attachInterrupt(digitalPinToInterrupt(drukknopPin), knopGedrukt, FALLING);
+  
+  Serial.println("Systeem gestart. Robot is klaar om te rijden!");
 }
 
-// ---------------- MOTOR FUNCTIONS ----------------
-void forward() {
-  digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, HIGH);
-  digitalWrite(IN4, LOW);
-  analogWrite(ENA, 150);
-  analogWrite(ENB, 150);
-}
-
-void backward() {
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, HIGH);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, HIGH);
-}
-
-void left() {
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, HIGH);
-  digitalWrite(IN3, HIGH);
-  digitalWrite(IN4, LOW);
-}
-
-void right() {
-  digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, HIGH);
-}
-
-void stopMotors() {
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, LOW);
-}
-
-// ---------------- DISTANCE FUNCTION ----------------
-long getDistance() {
-  digitalWrite(TRIG, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG, LOW);
-
-  long duration = pulseIn(ECHO, HIGH);
-  long distance = duration * 0.034 / 2;
-
-  return distance;
-}
-
-// ---------------- OBSTACLE AVOIDANCE ----------------
-void avoidObstacle() {
-  stopMotors();
-  delay(200);
-
-  long leftDist, rightDist;
-
-  // look left
-  scanner.write(150);
-  delay(400);
-  leftDist = getDistance();
-
-  // look right
-  scanner.write(30);
-  delay(400);
-  rightDist = getDistance();
-
-  scanner.write(90);
-  delay(200);
-
-  if (leftDist > rightDist) {
-    left();
-    delay(500);
-  } else {
-    right();
-    delay(500);
-  }
-}
-
-// ---------------- LINE FOLLOWING ----------------
-void lineFollow() {
-  int L = digitalRead(IR_LEFT);
-  int M = digitalRead(IR_MID);
-  int R = digitalRead(IR_RIGHT);
-
-  // Adjust depending on your sensor (0 = black or 1 = black)
-  // This assumes BLACK = LOW
-
-  if (M == LOW && L == HIGH && R == HIGH) {
-    forward();
-  }
-  else if (L == LOW) {
-    left();
-  }
-  else if (R == LOW) {
-    right();
-  }
-  else {
-    stopMotors();
-  }
-}
-
-// ---------------- LOOP ----------------
 void loop() {
-  long dist = getDistance();
-  Serial.println(dist);
+  unsigned long huidigeTijd = millis();
 
-  if (dist > 0 && dist < distanceThreshold) {
-    avoidObstacle();
+  if (robotMoetStoppen) {
+    // Checken of de 30 seconden al voorbij zijn
+    if (huidigeTijd - stopStartTijd >= stopDuur) {
+      Serial.println("30 seconden zijn om! Robot vertrekt weer.");
+      robotMoetStoppen = false;
+    } else {
+      // CODE ALS DE ROBOT STILSTAAT
+      digitalWrite(ledPin, HIGH); // Zet een LED aan als indicatie dat hij stopt
+      Serial.print("Robot staat tijdelijk stil... Resterende seconden: ");
+      Serial.println((stopDuur - (huidigeTijd - stopStartTijd)) / 1000);
+      
+      // HIER DE MOTOREN STOPPEN (bijv: analogWrite(motorPin, 0); )
+    }
   } else {
-    lineFollow();
+    // CODE ALS DE ROBOT GEWOON RIJDT
+    digitalWrite(ledPin, LOW);
+    Serial.println("Robot volgt de lijn... (Rijden)");
+    
+    // HIER JE STANDAARD LIJNVOLG CODE DIE DE MOTOREN AANSTUURT
   }
 
-  delay(50);
+  delay(500); // Dit is puur voor de Serial Monitor rustig te houden, mag straks weg
 }
