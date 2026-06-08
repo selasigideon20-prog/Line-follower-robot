@@ -1,7 +1,7 @@
-# Mercedes-Benz Auto Robot
+# 🚗 Line Follower Robot
 
-## Overzicht
-Autonome robot gebouwd met ESP32. De robot volgt een lijn en vermijdt obstakels met sensoren.
+## 🧠 ESP32 Autonomous Robot
+Robot die lijn volgt en obstakels vermijdt.
 
 ---
 
